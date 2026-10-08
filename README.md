@@ -63,7 +63,7 @@ The vector store is just a JSON file with embeddings and numpy cosine similarity
 
 - [ ] Swap JSON index for pgvector
 - [ ] Add conversation memory (right now every message is stateless)
-- [ ] Urdu support — half my customers ask in Roman Urdu
+- [ ] Multi-language support
 - [ ] Proper eval set (50+ cases instead of 8)
 
 PRs welcome. If you build something with this, tell me — I like seeing where it goes.
