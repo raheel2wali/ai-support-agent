@@ -21,7 +21,8 @@ Nothing here is magic. It's a Python backend, an LLM, a pile of markdown docs, a
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # then add your OPENAI_API_KEY
-python -m app.ingest   # builds the vector index from data/
+createdb shopassist && psql shopassist -c "CREATE EXTENSION vector;"
+python -m app.ingest   # chunks docs, embeds, stores in pgvector
 uvicorn app.main:app --reload
 ```
 
@@ -38,8 +39,8 @@ curl -X POST localhost:8000/chat \
 ```
 app/
   config.py      # env-based settings, fails fast if the API key is missing
-  ingest.py      # chunks data/*.md, embeds, writes data/index.json
-  rag.py         # loads the index, cosine-similarity search
+  ingest.py      # cleans markdown, 400-token chunks (50 overlap), embeds into pgvector
+  rag.py         # pgvector top-8 -> rerank top-3, citations, freshness filter
   tools.py       # order_lookup, create_ticket (stand-ins for real APIs)
   guardrails.py  # PII redaction, confidence threshold, human handoff
   agent.py       # the loop: retrieve -> decide -> act -> respond
@@ -48,20 +49,20 @@ evals/
   eval_basic.py  # 8 question/answer checks, prints pass/fail
 data/
   faqs.md        # sample knowledge base
-  index.json     # built by ingest.py (gitignored)
 ```
 
-The vector store is just a JSON file with embeddings and numpy cosine similarity. Deliberately boring — no database to operate for v1. When this outgrows JSON, pgvector is the obvious next step.
+The RAG pipeline (Part 2 of the series): docs are cleaned to markdown, cut into 400-token chunks with 50-token overlap, and embedded into pgvector with line numbers and deprecation flags. At query time we pull the top-8 candidates, down-rank deprecated docs (freshness filter), rerank on keyword overlap, and keep the top-3. Every chunk carries a citation like `data/faqs.md#L4-L9`, and the agent is instructed to quote it — or say it doesn't know.
 
 ## What broke along the way
 
 - Chunking by fixed size gave garbage retrieval. Chunking by markdown heading worked much better.
 - The agent used to "helpfully" invent order statuses. Fixed by forcing every order answer to come from the `order_lookup` tool, never from memory.
 - First version had no confidence threshold and confidently answered things it shouldn't have. Now anything below the threshold goes to a human.
+- First RAG version leaked raw PDFs into the prompt and quoted 2019 policy dates. Fixed with 400-token chunking, citations on every answer, and a freshness filter that down-ranks deprecated docs.
 
 ## Roadmap
 
-- [ ] Swap JSON index for pgvector
+- [x] Swap JSON index for pgvector (Part 2)
 - [ ] Add conversation memory (right now every message is stateless)
 - [ ] Multi-language support
 - [ ] Proper eval set (50+ cases instead of 8)
