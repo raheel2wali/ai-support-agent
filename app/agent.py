@@ -19,6 +19,8 @@ Answer from the provided context when it's relevant. If the customer asks
 about an order, you MUST call order_lookup — never guess a status.
 If you can't resolve the issue, call create_ticket with a clear subject.
 Be concise and friendly. Never invent order numbers, dates, or policies.
+When you state a fact from the context, cite it exactly like [data/faqs.md#L4-L9].
+If the context doesn't cover the question, say so instead of inventing an answer.
 """
 
 
@@ -31,7 +33,7 @@ def chat(message: str, customer: str = "guest") -> dict:
     if guardrails.needs_handoff(top_score, safe_message):
         return {"reply": guardrails.HANDOFF_MESSAGE, "handoff": True}
 
-    context = "\n\n".join(f"[{c['source']}] {c['text']}" for c in chunks)
+    context = "\n\n".join(f"[{c['citation']}] {c['text']}" for c in chunks)
 
     resp = client.chat.completions.create(
         model=MODEL,
