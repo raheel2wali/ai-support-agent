@@ -1,47 +1,79 @@
-"""Retrieval over the JSON index built by ingest.py.
+"""Retrieval for ShopAssist: pgvector top-8 -> rerank -> top-3, with citations.
 
-Deliberately simple: load embeddings into numpy, cosine similarity,
-return the top_k chunks. No database to operate for v1.
+This is the Part 2 pipeline in code:
+  1. cosine search in pgvector, take top-8 candidates
+  2. down-rank deprecated docs (freshness filter)
+  3. heuristic rerank on keyword overlap, keep top-3
+  4. every chunk carries a citation: source file + line range
 """
 
-import json
+import re
 
-import numpy as np
+import psycopg
 from openai import OpenAI
+from pgvector.psycopg import register_vector
 
-from app.config import EMBED_MODEL, INDEX_PATH, OPENAI_API_KEY
+from app.config import (
+    DATABASE_URL,
+    EMBED_MODEL,
+    FRESHNESS_PENALTY,
+    OPENAI_API_KEY,
+    RERANK_TOP_K,
+    RETRIEVE_TOP_K,
+)
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-_texts: list[str] = []
-_sources: list[str] = []
-_matrix: np.ndarray | None = None
+
+def _get_conn():
+    conn = psycopg.connect(DATABASE_URL)
+    register_vector(conn)
+    return conn
 
 
-def _load() -> None:
-    global _texts, _sources, _matrix
-    if _matrix is not None:
-        return
-    with open(INDEX_PATH) as f:
-        index = json.load(f)
-    _texts = [c["text"] for c in index]
-    _sources = [c["source"] for c in index]
-    mat = np.array([c["embedding"] for c in index], dtype=np.float32)
-    # Normalize once so search is a single dot product.
-    _matrix = mat / np.linalg.norm(mat, axis=1, keepdims=True)
+def _keyword_overlap(query: str, text: str) -> float:
+    # Cheap rerank signal: fraction of meaningful query words found in the chunk.
+    # No cross-encoder yet — cosine plus this gets us surprisingly far.
+    stop = {
+        "what", "whats", "is", "the", "a", "an", "my", "i", "do", "does",
+        "how", "to", "of", "for", "in", "on", "it", "are", "can", "your",
+    }
+    words = {w for w in re.findall(r"[a-z0-9]+", query.lower()) if w not in stop}
+    if not words:
+        return 0.0
+    lowered = text.lower()
+    return sum(1 for w in words if w in lowered) / len(words)
 
 
-def retrieve(query: str, top_k: int = 4) -> list[dict]:
-    _load()
-    assert _matrix is not None
-
+def retrieve(query: str, top_k: int = RERANK_TOP_K) -> list[dict]:
     resp = client.embeddings.create(model=EMBED_MODEL, input=query)
-    q = np.array(resp.data[0].embedding, dtype=np.float32)
-    q = q / np.linalg.norm(q)
+    qvec = resp.data[0].embedding
 
-    scores = _matrix @ q
-    top = np.argsort(scores)[::-1][:top_k]
-    return [
-        {"text": _texts[i], "source": _sources[i], "score": float(scores[i])}
-        for i in top
-    ]
+    with _get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT text, source, line_start, line_end, is_deprecated,
+                   embedding <=> %s AS distance
+            FROM chunks
+            ORDER BY distance
+            LIMIT %s
+            """,
+            (qvec, RETRIEVE_TOP_K),
+        ).fetchall()
+
+    scored = []
+    for text, source, line_start, line_end, is_deprecated, distance in rows:
+        score = 1.0 - float(distance)  # cosine distance -> similarity
+        if is_deprecated:
+            score *= FRESHNESS_PENALTY  # old policies sink; they don't disappear
+        score = 0.7 * score + 0.3 * _keyword_overlap(query, text)
+        scored.append(
+            {
+                "text": text,
+                "source": source,
+                "score": score,
+                "citation": f"{source}#L{line_start}-L{line_end}",
+            }
+        )
+    scored.sort(key=lambda c: c["score"], reverse=True)
+    return scored[:top_k]
