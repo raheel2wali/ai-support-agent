@@ -42,7 +42,7 @@ app/
   ingest.py      # cleans markdown, 400-token chunks (50 overlap), embeds into pgvector
   rag.py         # pgvector top-8 -> rerank top-3, citations, freshness filter
   tools.py       # order_lookup, create_ticket (stand-ins for real APIs)
-  guardrails.py  # PII redaction, confidence threshold, human handoff
+  guardrails.py  # PII redaction, confidence threshold, human handoff, injection tripwires
   agent.py       # the loop: retrieve -> decide -> act -> respond
   main.py        # FastAPI, single /chat endpoint
 evals/
