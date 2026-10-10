@@ -20,13 +20,26 @@ def redact_pii(text: str) -> str:
     return text
 
 
+# Crude prompt-injection tripwires. Catches the obvious "ignore your
+# instructions" class; a real deployment wants a classifier here.
+INJECTION_PATTERNS = (
+    "ignore your instructions",
+    "ignore all previous instructions",
+    "disregard your instructions",
+    "forget your instructions",
+)
+
+
 def needs_handoff(top_score: float, message: str) -> bool:
     # Low retrieval confidence -> don't guess, get a human.
     if top_score < CONFIDENCE_THRESHOLD:
         return True
-    # Angry customers shouldn't be debugged by a bot.
     lowered = message.lower()
+    # Angry customers shouldn't be debugged by a bot.
     if any(w in lowered for w in ("refund", "complaint", "lawyer", "fraud", "scam")):
+        return True
+    # Obvious prompt-injection attempts go to a human, not the model.
+    if any(p in lowered for p in INJECTION_PATTERNS):
         return True
     return False
 
