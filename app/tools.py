@@ -79,3 +79,11 @@ IMPLEMENTATIONS = {
     "order_lookup": order_lookup,
     "create_ticket": create_ticket,
 }
+
+# Every tool declares whether it only reads or also writes.
+# The agent runs reads freely; writes pause for a confirmation step
+# (or a dry run). If you add a tool that changes state, mark it "write".
+SCOPES = {
+    "order_lookup": "read",
+    "create_ticket": "write",
+}
