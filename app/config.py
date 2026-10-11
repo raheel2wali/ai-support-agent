@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Fail fast if the key is missing — better than a cryptic 401 three calls deep.
-OPENAI_API_KEY=<redacted>
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "text-embedding-3-small")
@@ -23,3 +23,7 @@ FRESHNESS_PENALTY = float(os.getenv("FRESHNESS_PENALTY", "0.4"))  # deprecated d
 
 # Retrieval score below this -> we don't trust the answer, hand off to a human.
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
+
+# Dry run mode: write tools log what they WOULD do instead of doing it.
+# Useful when testing new prompts — no real tickets get opened.
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
