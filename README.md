@@ -42,6 +42,12 @@ curl -X POST localhost:8000/confirm \
   -d '{"action_id": "a-0001", "approved": true}'
 ```
 
+Check the numbers it's running at:
+
+```bash
+curl localhost:8000/stats   # volume, handoff rate, avg latency
+```
+
 ## How it's put together
 
 ```
@@ -52,7 +58,7 @@ app/
   tools.py       # order_lookup, create_ticket (stand-ins for real APIs)
   guardrails.py  # PII redaction, confidence threshold, human handoff, injection tripwires
   agent.py       # the loop: retrieve -> decide -> act -> respond
-  main.py        # FastAPI: POST /chat, POST /confirm
+  main.py        # FastAPI: POST /chat, POST /confirm, GET /stats
 evals/
   eval_basic.py  # 8 question/answer checks + the confirmation flow, prints pass/fail
 data/
@@ -63,6 +69,10 @@ The RAG pipeline (Part 2 of the series): docs are cleaned to markdown, cut into 
 
 The tools layer (Part 3 of the series): answering isn't enough, so the agent can act — order_lookup and create_ticket through function calling. Reads run freely; writes pause for confirmation. Every tool declares a scope in tools.py ("read" or "write"), and when the model reaches for a write tool, /chat returns a pending action and waits for the customer to say yes via /confirm. DRY_RUN=true logs what would have happened without doing it, which is how I test new prompts without opening real tickets. The rule I keep repeating to myself: read freely, write carefully.
 
+The guardrails layer (Part 4 of the series): shipping without trust is just shipping risk. guardrails.py redacts PII before anything gets logged, hands off to a human below a 0.35 confidence threshold, and forces a handoff on trigger topics like fraud, lawyers, or an escalating complaint. It also watches for prompt injection, customers pasting in instructions that try to make the agent ignore its rules. The eval harness in evals/ runs the risky conversations on every change, so a new prompt has to prove it still behaves before it ships.
+
+Shipping it (Part 5 of the series): the last lessons were about operations, not models. Latency beats cleverness, a good answer in 2 seconds wins over a brilliant one in 8, so retrieval stays trimmed and responses stay short. Cost is a quiet per-ticket tax, so context stays small and the model only gets called when the agent actually needs it. GET /stats is the whole monitoring dashboard for now: chat volume, handoff rate, pending actions, average latency. And every conversation the agent gets wrong becomes a new eval case, so the test set grows out of real failures instead of guesses. That feedback loop is the part I'm most happy with.
+
 ## What broke along the way
 
 - Chunking by fixed size gave garbage retrieval. Chunking by markdown heading worked much better.
@@ -70,11 +80,13 @@ The tools layer (Part 3 of the series): answering isn't enough, so the agent can
 - First version had no confidence threshold and confidently answered things it shouldn't have. Now anything below the threshold goes to a human.
 - First RAG version leaked raw PDFs into the prompt and quoted 2019 policy dates. Fixed with 400-token chunking, citations on every answer, and a freshness filter that down-ranks deprecated docs.
 - Early version executed write tools the moment the model asked. One stray test message opened a real ticket in my helpdesk. Now writes need a confirmation step, and there's a dry-run mode for prompt experiments.
+- First production deploy sent every conversation through the biggest context I could build. The bill taught me faster than any benchmark: smaller context, fewer calls, same answers.
 
 ## Roadmap
 
 - [x] Swap JSON index for pgvector (Part 2)
 - [x] Safe tool execution: confirmation steps, dry-run mode, read/write scopes (Part 3)
+- [x] Ship it: production deploy, /stats monitoring, feedback loop into evals (Part 5)
 - [ ] Add conversation memory (right now every message is stateless)
 - [ ] Multi-language support
 - [ ] Proper eval set (50+ cases instead of 8)
